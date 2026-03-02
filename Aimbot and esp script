@@ -1,0 +1,315 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Variables de Control
+local espEnabled = false
+local aimbotActive = false
+local espObjects = {}
+local aimbotKey = nil 
+local espKey = nil
+local isBindingAimbot = false
+local isBindingESP = false
+local scriptRunning = true 
+
+-- Configuración de Aimbot Dinámico
+local smoothness = 0.9
+local minFOV = 10 
+local maxFOV = 50 
+
+--- UI DEL MENÚ ---
+local screenGui = Instance.new("ScreenGui", CoreGui)
+screenGui.Name = "LucasFinalMenu_V2"
+
+local mainFrame = Instance.new("Frame", screenGui)
+mainFrame.Size = UDim2.new(0, 250, 0, 180)
+mainFrame.Position = UDim2.new(0.5, -125, 0.4, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+mainFrame.BorderSizePixel = 2
+mainFrame.BorderColor3 = Color3.fromRGB(80, 0, 0)
+mainFrame.Active = true
+mainFrame.Draggable = true
+
+local closeBtn = Instance.new("TextButton", mainFrame)
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -35, 0, 5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.new(1, 1, 1)
+closeBtn.Font = Enum.Font.SourceSansBold
+closeBtn.TextSize = 20
+
+local bindAimbotBtn = Instance.new("TextButton", mainFrame)
+bindAimbotBtn.Size = UDim2.new(0.9, 0, 0, 50)
+bindAimbotBtn.Position = UDim2.new(0.05, 0, 0.25, 0)
+bindAimbotBtn.Text = "Asignar Tecla Aimbot"
+bindAimbotBtn.BackgroundColor3 = Color3.fromRGB(130, 0, 0)
+bindAimbotBtn.TextColor3 = Color3.new(1, 1, 1)
+bindAimbotBtn.Font = Enum.Font.SourceSansBold
+
+local bindESPBtn = Instance.new("TextButton", mainFrame)
+bindESPBtn.Size = UDim2.new(0.9, 0, 0, 45) -- Ajustado para que entre bien
+bindESPBtn.Position = UDim2.new(0.05, 0, 0.60, 0)
+bindESPBtn.Text = "Asignar Tecla ESP"
+bindESPBtn.BackgroundColor3 = Color3.fromRGB(0, 80, 130)
+bindESPBtn.TextColor3 = Color3.new(1, 1, 1)
+bindESPBtn.Font = Enum.Font.SourceSansBold
+
+--- FUNCIONES AUXILIARES ---
+
+local function darkenColor(color)
+    local h, s, v = color:ToHSV()
+    return Color3.fromHSV(h, s, v * 0.6)
+end
+
+local function cleanup()
+    scriptRunning = false
+    espEnabled = false
+    aimbotActive = false
+    for p, _ in pairs(espObjects) do
+        if espObjects[p].h then espObjects[p].h:Destroy() end
+        if espObjects[p].b then espObjects[p].b:Destroy() end
+        if espObjects[p].t then espObjects[p].t:Remove() end
+        if espObjects[p].conn then espObjects[p].conn:Disconnect() end
+    end
+    espObjects = {}
+    screenGui:Destroy()
+end
+
+closeBtn.MouseButton1Click:Connect(cleanup)
+
+local function getPlayerData(player)
+    if not player or not scriptRunning then return "", nil end
+    if player.Team and not player.Neutral then
+        return player.Team.Name:lower(), player.TeamColor.Color
+    end
+    for name, val in pairs(player:GetAttributes()) do
+        if name:lower() == "team" then return tostring(val):lower(), nil end
+    end
+    for _, obj in pairs(player:GetChildren()) do
+        if obj:IsA("ValueBase") and obj.Name:lower() == "team" then return tostring(obj.Value):lower(), nil end
+    end
+    return "", nil
+end
+
+local function getESPColor(player)
+    local teamName, nativeColor = getPlayerData(player)
+    if nativeColor then return nativeColor end
+    if teamName:find("counter") then return Color3.fromRGB(0, 160, 255)
+    elseif teamName:find("terrorist") then return Color3.fromRGB(255, 140, 0) end
+    return Color3.fromRGB(255, 0, 0)
+end
+
+local function isEnemy(player)
+    if not player or player == LocalPlayer then return false end
+    
+    -- NUEVA LÓGICA: Si yo no tengo personaje, ESP para todos
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("Head") then
+        return true
+    end
+
+    local myTeamName = getPlayerData(LocalPlayer)
+    local targetTeamName = getPlayerData(player)
+    if myTeamName == "" or targetTeamName == "" then return true end
+    return myTeamName ~= targetTeamName
+end
+
+--- MANEJO DE ESP ---
+
+local function removeESP(player)
+    if espObjects[player] then
+        if espObjects[player].h then espObjects[player].h:Destroy() end
+        if espObjects[player].b then espObjects[player].b:Destroy() end
+        if espObjects[player].t then espObjects[player].t:Remove() end
+        if espObjects[player].conn then espObjects[player].conn:Disconnect() end
+        espObjects[player] = nil
+    end
+end
+
+local function createESP(player)
+    if not scriptRunning or not espEnabled or not isEnemy(player) or espObjects[player] then return end
+    local char = player.Character
+    if not char then return end
+    local head = char:WaitForChild("Head", 5)
+    if not head then return end
+
+    local color = getESPColor(player)
+    local borderCol = darkenColor(color)
+
+    local h = Instance.new("Highlight", char)
+    h.FillColor = color
+    h.FillTransparency = 0.95 
+    h.OutlineColor = borderCol
+    h.OutlineTransparency = 0.5
+
+    local b = Instance.new("BillboardGui", head)
+    b.Size = UDim2.new(0, 100, 0, 50)
+    b.AlwaysOnTop = true
+    b.StudsOffset = Vector3.new(0, 3, 0)
+    local l = Instance.new("TextLabel", b)
+    l.Size = UDim2.new(1, 0, 1, 0)
+    l.TextColor3 = color
+    l.BackgroundTransparency = 1
+    l.Font = Enum.Font.SourceSansBold
+    l.TextSize = 14
+    l.Text = player.Name
+
+    local tr = Drawing.new("Line")
+    tr.Thickness = 2
+    tr.Color = color
+    tr.Transparency = 1
+
+    local conn = char.ChildRemoved:Connect(function(child)
+        if (child == h or child == b) and scriptRunning and espEnabled then
+            task.wait(0.2)
+            removeESP(player)
+            if isEnemy(player) then createESP(player) end
+        end
+    end)
+
+    espObjects[player] = {h = h, b = b, t = tr, conn = conn}
+end
+
+--- INPUTS ---
+
+bindAimbotBtn.MouseButton1Click:Connect(function()
+    isBindingAimbot = true
+    bindAimbotBtn.Text = "Presioná una tecla..."
+end)
+
+bindESPBtn.MouseButton1Click:Connect(function()
+    isBindingESP = true
+    bindESPBtn.Text = "Presioná una tecla..."
+end)
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if not scriptRunning then return end
+    if isBindingAimbot then
+        aimbotKey = (input.UserInputType == Enum.UserInputType.Keyboard) and input.KeyCode or input.UserInputType
+        isBindingAimbot = false
+        bindAimbotBtn.Text = "Aimbot: " .. tostring(aimbotKey.Name)
+        return
+    end
+    if isBindingESP then
+        espKey = (input.UserInputType == Enum.UserInputType.Keyboard) and input.KeyCode or input.UserInputType
+        isBindingESP = false
+        bindESPBtn.Text = "ESP: " .. tostring(espKey.Name)
+        return
+    end
+    if aimbotKey and (input.KeyCode == aimbotKey or input.UserInputType == aimbotKey) then
+        aimbotActive = true
+    end
+    if espKey and (input.KeyCode == espKey or input.UserInputType == espKey) then
+        espEnabled = not espEnabled
+        if not espEnabled then 
+            for p in pairs(espObjects) do removeESP(p) end
+        else 
+            for _, p in pairs(Players:GetPlayers()) do createESP(p) end 
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if aimbotKey and (input.KeyCode == aimbotKey or input.UserInputType == aimbotKey) then
+        aimbotActive = false
+    end
+end)
+
+--- LOOP PRINCIPAL ---
+
+RunService.RenderStepped:Connect(function()
+    if not scriptRunning then return end
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local mouseLoc = UserInputService:GetMouseLocation()
+
+    -- Aimbot solo funciona si tengo personaje (para evitar errores)
+    if aimbotActive and LocalPlayer.Character then
+        local target = nil
+        local bestMag = 9999
+        for _, p in pairs(Players:GetPlayers()) do
+            if isEnemy(p) and p.Character and p.Character:FindFirstChild("Head") then
+                local head = p.Character.Head
+                local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then
+                    local pos, vis = Camera:WorldToViewportPoint(head.Position)
+                    if vis then
+                        local distance = (head.Position - Camera.CFrame.Position).Magnitude
+                        local alpha = math.clamp((distance - 5) / (100 - 5), 0, 1)
+                        local dynamicFOV = maxFOV + (minFOV - maxFOV) * alpha
+                        local mag = (Vector2.new(pos.X, pos.Y) - mouseLoc).Magnitude
+                        if mag <= dynamicFOV and mag < bestMag then
+                            target = pos
+                            bestMag = mag
+                        end
+                    end
+                end
+            end
+        end
+        if target then mousemoverel((target.X - mouseLoc.X) * smoothness, (target.Y - mouseLoc.Y) * smoothness) end
+    end
+
+    if espEnabled then
+        for p, data in pairs(espObjects) do
+            -- Si el jugador ya no es enemigo (porque respawneamos y es aliado), lo sacamos
+            if not isEnemy(p) then
+                removeESP(p)
+            elseif p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                local pos, vis = Camera:WorldToViewportPoint(p.Character.HumanoidRootPart.Position)
+                data.t.From = Vector2.new(center.X, Camera.ViewportSize.Y - 20)
+                if vis and pos.Z > 0 then
+                    data.t.To = Vector2.new(pos.X, pos.Y)
+                else
+                    local x, y = pos.X - center.X, pos.Y - center.Y
+                    if pos.Z < 0 then x, y = -x, -y end
+                    local ang = math.atan2(y, x)
+                    local bX = center.X + math.cos(ang) * 1000
+                    local bY = center.Y + math.sin(ang) * 1000
+                    data.t.To = Vector2.new(math.clamp(bX, 10, Camera.ViewportSize.X - 10), math.clamp(bY, 10, Camera.ViewportSize.Y - 10))
+                end
+                data.t.Visible = true
+            else 
+                removeESP(p) 
+            end
+        end
+    end
+end)
+
+--- RE-DETECCIÓN ---
+task.spawn(function()
+    while task.wait(1) and scriptRunning do
+        if espEnabled then
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and isEnemy(p) and p.Character and not espObjects[p] then
+                    createESP(p)
+                end
+            end
+        end
+    end
+end)
+
+-- Detectar cuando YO respawneo o muero para resetear el ESP
+LocalPlayer.CharacterAdded:Connect(function()
+    if espEnabled then
+        for p in pairs(espObjects) do removeESP(p) end
+    end
+end)
+
+LocalPlayer.CharacterRemoving:Connect(function()
+    task.wait(0.1) -- Pequeño delay para que el script asuma que no hay personaje
+    if espEnabled then
+        for p in pairs(espObjects) do removeESP(p) end
+    end
+end)
+
+local function setup(p)
+    p.CharacterAdded:Connect(function()
+        if not scriptRunning then return end
+        task.wait(0.5)
+        if espEnabled and isEnemy(p) then removeESP(p) createESP(p) end
+    end)
+end
+for _, p in pairs(Players:GetPlayers()) do setup(p) end
+Players.PlayerAdded:Connect(setup)
