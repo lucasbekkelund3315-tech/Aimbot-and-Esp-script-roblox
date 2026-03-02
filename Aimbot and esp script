@@ -19,13 +19,14 @@ local scriptRunning = true
 local smoothness = 0.9
 local minFOV = 10 
 local maxFOV = 50 
+local fovMultiplier = 1
 
 --- UI DEL MENÚ ---
 local screenGui = Instance.new("ScreenGui", CoreGui)
 screenGui.Name = "LucasFinalMenu_V2"
 
 local mainFrame = Instance.new("Frame", screenGui)
-mainFrame.Size = UDim2.new(0, 250, 0, 180)
+mainFrame.Size = UDim2.new(0, 250, 0, 230) -- Aumentado para el TextBox
 mainFrame.Position = UDim2.new(0.5, -125, 0.4, 0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 mainFrame.BorderSizePixel = 2
@@ -40,23 +41,46 @@ closeBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
 closeBtn.Text = "X"
 closeBtn.TextColor3 = Color3.new(1, 1, 1)
 closeBtn.Font = Enum.Font.SourceSansBold
-closeBtn.TextSize = 20
+closeBtn.TextScaled = true
 
 local bindAimbotBtn = Instance.new("TextButton", mainFrame)
-bindAimbotBtn.Size = UDim2.new(0.9, 0, 0, 50)
-bindAimbotBtn.Position = UDim2.new(0.05, 0, 0.25, 0)
+bindAimbotBtn.Size = UDim2.new(0.9, 0, 0, 45)
+bindAimbotBtn.Position = UDim2.new(0.05, 0, 0.20, 0)
 bindAimbotBtn.Text = "Asignar Tecla Aimbot"
+bindAimbotBtn.TextScaled = true
 bindAimbotBtn.BackgroundColor3 = Color3.fromRGB(130, 0, 0)
 bindAimbotBtn.TextColor3 = Color3.new(1, 1, 1)
 bindAimbotBtn.Font = Enum.Font.SourceSansBold
 
 local bindESPBtn = Instance.new("TextButton", mainFrame)
-bindESPBtn.Size = UDim2.new(0.9, 0, 0, 45) -- Ajustado para que entre bien
-bindESPBtn.Position = UDim2.new(0.05, 0, 0.60, 0)
+bindESPBtn.Size = UDim2.new(0.9, 0, 0, 45)
+bindESPBtn.Position = UDim2.new(0.05, 0, 0.45, 0)
 bindESPBtn.Text = "Asignar Tecla ESP"
+bindESPBtn.TextScaled = true
 bindESPBtn.BackgroundColor3 = Color3.fromRGB(0, 80, 130)
 bindESPBtn.TextColor3 = Color3.new(1, 1, 1)
 bindESPBtn.Font = Enum.Font.SourceSansBold
+
+-- EL TEXTBOX QUE PEDISTE
+local multBox = Instance.new("TextBox", mainFrame)
+multBox.Size = UDim2.new(0.9, 0, 0, 40)
+multBox.Position = UDim2.new(0.05, 0, 0.70, 0)
+multBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+multBox.TextColor3 = Color3.new(1, 1, 1)
+multBox.Font = Enum.Font.SourceSansBold
+multBox.Text = ""
+multBox.TextScaled = true
+multBox.PlaceholderText = "Cuanto de lejos de la cabeza para el aimbot (Default 1)"
+
+--- LÓGICA DEL MULTIPLICADOR ---
+multBox.FocusLost:Connect(function()
+    local val = tonumber(multBox.Text)
+    if val then
+        fovMultiplier = val
+    else
+        multBox.Text = tostring(fovMultiplier)
+    end
+end)
 
 --- FUNCIONES AUXILIARES ---
 
@@ -105,12 +129,9 @@ end
 
 local function isEnemy(player)
     if not player or player == LocalPlayer then return false end
-    
-    -- NUEVA LÓGICA: Si yo no tengo personaje, ESP para todos
     if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("Head") then
         return true
     end
-
     local myTeamName = getPlayerData(LocalPlayer)
     local targetTeamName = getPlayerData(player)
     if myTeamName == "" or targetTeamName == "" then return true end
@@ -225,10 +246,14 @@ RunService.RenderStepped:Connect(function()
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     local mouseLoc = UserInputService:GetMouseLocation()
 
-    -- Aimbot solo funciona si tengo personaje (para evitar errores)
     if aimbotActive and LocalPlayer.Character then
         local target = nil
         local bestMag = 9999
+        
+        -- USAMOS EL MULTIPLICADOR ACÁ
+        local currentMin = minFOV * fovMultiplier
+        local currentMax = maxFOV * fovMultiplier
+
         for _, p in pairs(Players:GetPlayers()) do
             if isEnemy(p) and p.Character and p.Character:FindFirstChild("Head") then
                 local head = p.Character.Head
@@ -238,7 +263,10 @@ RunService.RenderStepped:Connect(function()
                     if vis then
                         local distance = (head.Position - Camera.CFrame.Position).Magnitude
                         local alpha = math.clamp((distance - 5) / (100 - 5), 0, 1)
-                        local dynamicFOV = maxFOV + (minFOV - maxFOV) * alpha
+                        
+                        -- Aplicamos los valores multiplicados
+                        local dynamicFOV = currentMax + (currentMin - currentMax) * alpha
+                        
                         local mag = (Vector2.new(pos.X, pos.Y) - mouseLoc).Magnitude
                         if mag <= dynamicFOV and mag < bestMag then
                             target = pos
@@ -253,7 +281,6 @@ RunService.RenderStepped:Connect(function()
 
     if espEnabled then
         for p, data in pairs(espObjects) do
-            -- Si el jugador ya no es enemigo (porque respawneamos y es aliado), lo sacamos
             if not isEnemy(p) then
                 removeESP(p)
             elseif p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
@@ -290,7 +317,6 @@ task.spawn(function()
     end
 end)
 
--- Detectar cuando YO respawneo o muero para resetear el ESP
 LocalPlayer.CharacterAdded:Connect(function()
     if espEnabled then
         for p in pairs(espObjects) do removeESP(p) end
@@ -298,7 +324,7 @@ LocalPlayer.CharacterAdded:Connect(function()
 end)
 
 LocalPlayer.CharacterRemoving:Connect(function()
-    task.wait(0.1) -- Pequeño delay para que el script asuma que no hay personaje
+    task.wait(0.1)
     if espEnabled then
         for p in pairs(espObjects) do removeESP(p) end
     end
